@@ -1,9 +1,12 @@
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import kotlin.math.max
+import kotlin.math.min
+
 /**
  * Bank implementation.
  *
- * :TODO: This implementation has to be made thread-safe.
- *
- * @author :TODO: LastName FirstName
+ * @author Belousov Timofey
  */
 class BankImpl(n: Int) : Bank {
     private val accounts: Array<Account> = Array(n) { Account() }
@@ -11,57 +14,50 @@ class BankImpl(n: Int) : Bank {
     override val numberOfAccounts: Int
         get() = accounts.size
 
-    /**
-     * :TODO: This method has to be made thread-safe.
-     */
-    override fun getAmount(index: Int): Long {
-        return accounts[index].amount
-    }
+    override fun getAmount(index: Int): Long = accounts[index].lock.withLock { accounts[index].amount }
 
-    /**
-     * :TODO: This method has to be made thread-safe.
-     */
     override val totalAmount: Long
         get() {
-            return accounts.sumOf { account ->
-                account.amount
-            }
+            accounts.forEach { it.lock.lock() }
+            val result = accounts.sumOf { it.amount }
+            accounts.forEach { it.lock.unlock() }
+            return result
         }
 
-    /**
-     * :TODO: This method has to be made thread-safe.
-     */
     override fun deposit(index: Int, amount: Long): Long {
         require(amount > 0) { "Invalid amount: $amount" }
         val account = accounts[index]
-        check(!(amount > Bank.MAX_AMOUNT || account.amount + amount > Bank.MAX_AMOUNT)) { "Overflow" }
-        account.amount += amount
-        return account.amount
+        account.lock.withLock {
+            check(!(amount > Bank.MAX_AMOUNT || account.amount + amount > Bank.MAX_AMOUNT)) { "Overflow" }
+            account.amount += amount
+            return account.amount
+        }
     }
 
-    /**
-     * :TODO: This method has to be made thread-safe.
-     */
     override fun withdraw(index: Int, amount: Long): Long {
         require(amount > 0) { "Invalid amount: $amount" }
         val account = accounts[index]
-        check(account.amount - amount >= 0) { "Underflow" }
-        account.amount -= amount
-        return account.amount
+        account.lock.withLock {
+            check(account.amount - amount >= 0) { "Underflow" }
+            account.amount -= amount
+            return account.amount
+        }
     }
 
-    /**
-     * :TODO: This method has to be made thread-safe.
-     */
     override fun transfer(fromIndex: Int, toIndex: Int, amount: Long) {
         require(amount > 0) { "Invalid amount: $amount" }
         require(fromIndex != toIndex) { "fromIndex == toIndex" }
         val from = accounts[fromIndex]
         val to = accounts[toIndex]
-        check(amount <= from.amount) { "Underflow" }
-        check(!(amount > Bank.MAX_AMOUNT || to.amount + amount > Bank.MAX_AMOUNT)) { "Overflow" }
-        from.amount -= amount
-        to.amount += amount
+
+        accounts[min(fromIndex, toIndex)].lock.withLock {
+            accounts[max(fromIndex, toIndex)].lock.withLock {
+                check(amount <= from.amount) { "Underflow" }
+                check(!(amount > Bank.MAX_AMOUNT || to.amount + amount > Bank.MAX_AMOUNT)) { "Overflow" }
+                from.amount -= amount
+                to.amount += amount
+            }
+        }
     }
 
     /**
@@ -72,5 +68,6 @@ class BankImpl(n: Int) : Bank {
          * Amount of funds in this account.
          */
         var amount: Long = 0
+        val lock: ReentrantLock = ReentrantLock()
     }
 }
